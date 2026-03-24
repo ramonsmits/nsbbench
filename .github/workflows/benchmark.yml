@@ -47,16 +47,6 @@ jobs:
           echo "MQ listener not available"
           exit 1
 
-      - name: Create queues
-        run: |
-          docker exec $(docker ps -q --filter ancestor=icr.io/ibm-messaging/mq:latest) \
-            runmqsc QM1 <<'MQSC'
-          DEFINE QLOCAL('bench.a')
-          DEFINE QLOCAL('bench.b')
-          DEFINE QLOCAL('bench.warmup')
-          DEFINE QLOCAL('error')
-          MQSC
-
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'

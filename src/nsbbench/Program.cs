@@ -302,7 +302,7 @@ IBMMQTransport CreateTransport(TxMode txMode)
     return transport;
 }
 
-HostSettings CreateHostSettings(bool setupInfrastructure = false) => new(
+HostSettings CreateHostSettings(bool setupInfrastructure = true) => new(
     name: "nsbbench",
     hostDisplayName: "nsbbench",
     startupDiagnostic: new StartupDiagnosticEntries(),
