@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageFloatingVersionsEnabled>true</CentralPackageFloatingVersionsEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="IBMMQDotnetClient" Version="9.*" />
+    <PackageVersion Include="NServiceBus.Transport.IBMMQ" Version="1.*-*" />
+  </ItemGroup>
+</Project>

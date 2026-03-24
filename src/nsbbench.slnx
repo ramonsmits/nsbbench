@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="mqbench/mqbench.csproj" />
+  <Project Path="nsbbench/nsbbench.csproj" />
+</Solution>

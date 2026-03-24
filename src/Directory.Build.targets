@@ -1,0 +1,13 @@
+<Project>
+  <Target Name="UseIBMMQProjectReference"
+          BeforeTargets="CollectPackageReferences"
+          Condition="'$(UseIBMMQSource)' == 'true'">
+    <FindInList List="@(PackageReference)" ItemSpecToFind="NServiceBus.Transport.IBMMQ">
+      <Output TaskParameter="ItemFound" ItemName="_FoundIBMMQRef" />
+    </FindInList>
+    <ItemGroup Condition="'@(_FoundIBMMQRef)' != ''">
+      <PackageReference Remove="NServiceBus.Transport.IBMMQ" />
+      <ProjectReference Include="$(MSBuildThisFileDirectory)../../NServiceBus.Transport.IBMMQ/src/Transport/NServiceBus.Transport.IBMMQ.csproj" />
+    </ItemGroup>
+  </Target>
+</Project>
