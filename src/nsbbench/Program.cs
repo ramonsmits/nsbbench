@@ -289,16 +289,16 @@ TransportTransactionMode MapTxMode(TxMode mode) => mode switch
 
 IBMMQTransport CreateTransport(TxMode txMode)
 {
-    var transport = new IBMMQTransport(o =>
+    var transport = new IBMMQTransport
     {
-        o.Host = ibmmqHost;
-        o.Port = ibmmqPort;
-        o.QueueManagerName = qmgrName;
-        o.Channel = ibmmqChannel;
-        o.User = ibmmqUser;
-        o.Password = ibmmqPassword;
-    });
-    transport.TransportTransactionMode = MapTxMode(txMode);
+        Host = ibmmqHost,
+        Port = ibmmqPort,
+        QueueManagerName = qmgrName,
+        Channel = ibmmqChannel,
+        User = ibmmqUser,
+        Password = ibmmqPassword,
+        TransportTransactionMode = MapTxMode(txMode)
+    };
     return transport;
 }
 
