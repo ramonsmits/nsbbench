@@ -449,7 +449,7 @@ int RunBenchmark(string[] a)
     var requiredDepth = Math.Max(maxCount + 1000, 5000);
     using (var setupQm = ConnectQueueManager())
     {
-        foreach (var q in new[] { queueA, queueB })
+        foreach (var q in new[] { queueA, queueB, "bench.warmup", "error" })
             EnsureQueue(setupQm, q, requiredDepth);
     }
 
