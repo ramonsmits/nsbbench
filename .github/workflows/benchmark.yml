@@ -50,7 +50,7 @@ jobs:
       - name: Create queues
         run: |
           docker exec $(docker ps -q --filter ancestor=icr.io/ibm-messaging/mq:latest) \
-            bash -c "echo -e 'DEFINE QLOCAL(bench.a)\nDEFINE QLOCAL(bench.b)\nDEFINE QLOCAL(bench.warmup)' | runmqsc QM1"
+            bash -c "printf 'DEFINE QLOCAL(\"bench.a\")\nDEFINE QLOCAL(\"bench.b\")\nDEFINE QLOCAL(\"bench.warmup\")\nDEFINE QLOCAL(\"error\")\n' | runmqsc QM1"
 
       - uses: actions/setup-dotnet@v4
         with:
