@@ -257,10 +257,13 @@ SummaryRow ComputeSummaryRow(string scenario, string phase, int count, List<RunR
     var allocPerMsg = results.Select(r => r.Processed > 0 ? r.Metrics.AllocatedBytes / r.Processed : 0L).ToList();
     var diskMetrics = metrics.Select(m => m.Disk).ToList();
 
+    var seconds = results.Select(r => r.Seconds).ToList();
+
     return new SummaryRow(
         scenario, phase,
         Median(new List<double>(rates)),
         rates.Average(),
+        seconds.Average(),
         FormatAllocPerMsg(MedianLong(new List<long>(allocPerMsg)), 1),
         MedianInt(metrics.Select(m => m.Gen0).ToList()),
         MedianInt(metrics.Select(m => m.Gen1).ToList()),
@@ -760,6 +763,7 @@ async Task<int> RunBenchmark(string[] a)
                 phase = r.Phase,
                 medianRate = r.MedianRate,
                 avgRate = r.AvgRate,
+                avgSeconds = Math.Round(r.AvgSeconds, 2),
                 allocPerMsg = r.AllocPerMsg,
                 gc = new { gen0 = r.Gen0, gen1 = r.Gen1, gen2 = r.Gen2 },
                 pauseMs = r.PauseMs,
@@ -783,7 +787,7 @@ record RunResult(double Seconds, double Rate, int Processed, int Errors, Metrics
 
 record SummaryRow(
     string Scenario, string Phase,
-    double MedianRate, double AvgRate,
+    double MedianRate, double AvgRate, double AvgSeconds,
     string AllocPerMsg,
     int Gen0, int Gen1, int Gen2,
     double PauseMs, double CpuSec,

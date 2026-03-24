@@ -26,7 +26,7 @@ Console.WriteLine($"{Dim}IBMMQDotnetClient {mqClientVersion}{Reset}");
 
 const double MinRunSeconds = 5.0;
 
-if (args.Length < 3)
+if (args.Length < 1)
 {
     PrintUsage();
     return 1;
@@ -39,6 +39,7 @@ return command switch
     "send" => RunSend(args),
     "receive" => RunReceive(args),
     "receivesend" => RunReceiveSend(args),
+    "benchmark" => RunBenchmark(args),
     _ => PrintUsage()
 };
 
@@ -48,6 +49,7 @@ int PrintUsage()
     Console.Error.WriteLine("  mqbench send <queue> <txmode> <durability> [-n <count>] [-c <concurrency>] [-i <iterations>]");
     Console.Error.WriteLine("  mqbench receive <queue> <txmode> <durability> [-n <count>] [-c <concurrency>] [-i <iterations>]");
     Console.Error.WriteLine("  mqbench receivesend <srcqueue> <destqueue> <txmode> <durability> [-n <count>] [-c <concurrency>] [-i <iterations>]");
+    Console.Error.WriteLine("  mqbench benchmark [--express] [--durable] [--tx none,receive,atomic] [-n <count>] [-c <concurrency>] [-i <iterations>] [--json <path>]");
     Console.Error.WriteLine();
     Console.Error.WriteLine("Transaction modes: none, receive, atomic");
     Console.Error.WriteLine("Durability: durable, express");
@@ -394,5 +396,202 @@ int RunReceiveSend(string[] a)
     Console.WriteLine($"{Bold}{Green}ReceiveSend {count:N0} — median {Median(rates):N0} msg/s, avg {rates.Average():N0} msg/s{Reset}");
     return 0;
 }
+
+int RunBenchmark(string[] a)
+{
+    var queueA = "bench.a";
+    var queueB = "bench.b";
+    List<TxMode>? txModes = null;
+    bool flagDurable = false, flagExpress = false;
+    int? explicitCount = null;
+    int concurrency = Environment.ProcessorCount;
+    int iterations = 3;
+    string? jsonPath = null;
+
+    for (var i = 1; i < a.Length; i++)
+    {
+        switch (a[i])
+        {
+            case "--queues" when i + 1 < a.Length:
+                var parts = a[++i].Split(',');
+                queueA = parts[0];
+                queueB = parts.Length > 1 ? parts[1] : parts[0] + ".b";
+                break;
+            case "--tx" when i + 1 < a.Length:
+                txModes = a[++i].Split(',').Select(ParseTxMode).Distinct().ToList();
+                break;
+            case "--durable": flagDurable = true; break;
+            case "--express": flagExpress = true; break;
+            case "-n" when i + 1 < a.Length: explicitCount = int.Parse(a[++i]); break;
+            case "-c" when i + 1 < a.Length: concurrency = int.Parse(a[++i]); break;
+            case "-i" when i + 1 < a.Length:
+                var n = int.Parse(a[++i]);
+                if (n % 2 == 0) throw new ArgumentException("Iterations must be odd for median calculation.");
+                iterations = n;
+                break;
+            case "--json" when i + 1 < a.Length: jsonPath = a[++i]; break;
+        }
+    }
+
+    txModes ??= [TxMode.None, TxMode.Receive, TxMode.Atomic];
+
+    var durabilities = (flagExpress, flagDurable) switch
+    {
+        (false, false) => new[] { true, false },
+        (true, true) => new[] { true, false },
+        (true, false) => new[] { true },
+        (false, true) => new[] { false },
+    };
+
+    Console.WriteLine($"=== mqbench: concurrency={concurrency}, {iterations} iterations ===");
+    Console.WriteLine();
+
+    var allRows = new List<BenchmarkRow>();
+
+    foreach (var express in durabilities)
+    {
+        foreach (var txMode in txModes)
+        {
+            var durLabel = express ? "express" : "durable";
+            var txLabel = txMode.ToString().ToLowerInvariant();
+            var scenarioLabel = $"{durLabel} tx={txLabel}";
+            var count = explicitCount ?? (express ? 150_000 : 15_000);
+            var useSyncpoint = txMode != TxMode.None;
+
+            Console.WriteLine($"--- {scenarioLabel} ({count:N0} msgs) ---");
+
+            var sendRates = new List<double>(iterations);
+            var sendSeconds = new List<double>(iterations);
+            var recvSendRates = new List<double>(iterations);
+            var recvSendSeconds = new List<double>(iterations);
+            var receiveRates = new List<double>(iterations);
+            var receiveSeconds = new List<double>(iterations);
+
+            for (var iter = 0; iter < iterations; iter++)
+            {
+                // Send
+                var remaining = count;
+                var sw = Stopwatch.StartNew();
+                Task.WhenAll(Enumerable.Range(0, concurrency).Select(_ => Task.Run(() =>
+                {
+                    using var qm = ConnectQueueManager();
+                    using var q = qm.AccessQueue(queueA, MQC.MQOO_OUTPUT);
+                    var pmo = new MQPutMessageOptions { Options = useSyncpoint ? MQC.MQPMO_SYNCPOINT : MQC.MQPMO_NO_SYNCPOINT };
+                    while (true)
+                    {
+                        var grab = Math.Min(Interlocked.Add(ref remaining, -1000) + 1000, 1000);
+                        if (grab <= 0) break;
+                        for (var j = 0; j < grab; j++) { q.Put(CreateMessage(express), pmo); if (useSyncpoint) qm.Commit(); }
+                    }
+                }))).GetAwaiter().GetResult();
+                sw.Stop();
+                var sendRate = count / sw.Elapsed.TotalSeconds;
+                sendRates.Add(sendRate);
+                sendSeconds.Add(sw.Elapsed.TotalSeconds);
+
+                // ReceiveSend
+                remaining = count;
+                sw = Stopwatch.StartNew();
+                Task.WhenAll(Enumerable.Range(0, concurrency).Select(_ => Task.Run(() =>
+                {
+                    using var qm = ConnectQueueManager();
+                    using var srcQ = qm.AccessQueue(queueA, MQC.MQOO_INPUT_SHARED);
+                    using var destQ = qm.AccessQueue(queueB, MQC.MQOO_OUTPUT);
+                    var gmo = new MQGetMessageOptions { Options = (txMode != TxMode.None ? MQC.MQGMO_SYNCPOINT : MQC.MQGMO_NO_SYNCPOINT) | MQC.MQGMO_NO_WAIT | MQC.MQGMO_FAIL_IF_QUIESCING };
+                    var pmo = new MQPutMessageOptions { Options = txMode == TxMode.Atomic ? MQC.MQPMO_SYNCPOINT : MQC.MQPMO_NO_SYNCPOINT };
+                    while (true)
+                    {
+                        var grab = Math.Min(Interlocked.Add(ref remaining, -1000) + 1000, 1000);
+                        if (grab <= 0) break;
+                        for (var j = 0; j < grab; j++)
+                        {
+                            var msg = new MQMessage();
+                            try { srcQ.Get(msg, gmo); } catch (MQException ex) when (ex.ReasonCode == MQC.MQRC_NO_MSG_AVAILABLE) { Interlocked.Add(ref remaining, -(grab - j - 1)); return; }
+                            msg.Persistence = express ? MQC.MQPER_NOT_PERSISTENT : MQC.MQPER_PERSISTENT;
+                            destQ.Put(msg, pmo);
+                            if (txMode != TxMode.None) qm.Commit();
+                        }
+                    }
+                }))).GetAwaiter().GetResult();
+                sw.Stop();
+                var rsProcessed = count - Math.Max(0, remaining);
+                var rsRate = rsProcessed / sw.Elapsed.TotalSeconds;
+                recvSendRates.Add(rsRate);
+                recvSendSeconds.Add(sw.Elapsed.TotalSeconds);
+
+                // Receive
+                remaining = count;
+                sw = Stopwatch.StartNew();
+                Task.WhenAll(Enumerable.Range(0, concurrency).Select(_ => Task.Run(() =>
+                {
+                    using var qm = ConnectQueueManager();
+                    using var q = qm.AccessQueue(queueB, MQC.MQOO_INPUT_SHARED);
+                    var gmo = new MQGetMessageOptions { Options = (useSyncpoint ? MQC.MQGMO_SYNCPOINT : MQC.MQGMO_NO_SYNCPOINT) | MQC.MQGMO_NO_WAIT | MQC.MQGMO_FAIL_IF_QUIESCING };
+                    while (true)
+                    {
+                        var grab = Math.Min(Interlocked.Add(ref remaining, -1000) + 1000, 1000);
+                        if (grab <= 0) break;
+                        for (var j = 0; j < grab; j++)
+                        {
+                            var msg = new MQMessage();
+                            try { q.Get(msg, gmo); } catch (MQException ex) when (ex.ReasonCode == MQC.MQRC_NO_MSG_AVAILABLE) { Interlocked.Add(ref remaining, -(grab - j - 1)); return; }
+                            if (useSyncpoint) qm.Commit();
+                        }
+                    }
+                }))).GetAwaiter().GetResult();
+                sw.Stop();
+                var recvProcessed = count - Math.Max(0, remaining);
+                var recvRate = recvProcessed / sw.Elapsed.TotalSeconds;
+                receiveRates.Add(recvRate);
+                receiveSeconds.Add(sw.Elapsed.TotalSeconds);
+
+                Console.WriteLine($"  {Dim}#{iter + 1}:{Reset} send {Green}{sendRate:N0}/s{Reset} recvsend {Green}{rsRate:N0}/s{Reset} recv {Green}{recvRate:N0}/s{Reset}");
+            }
+
+            allRows.Add(new(scenarioLabel, "Send", Median(sendRates), sendRates.Average(), sendSeconds.Average()));
+            allRows.Add(new(scenarioLabel, "RecvSend", Median(recvSendRates), recvSendRates.Average(), recvSendSeconds.Average()));
+            allRows.Add(new(scenarioLabel, "Receive", Median(receiveRates), receiveRates.Average(), receiveSeconds.Average()));
+            Console.WriteLine();
+        }
+    }
+
+    // Print summary table
+    Console.WriteLine($" | {"Scenario",-19} | {"Phase",-8} | {"Median/s",10} | {"Avg/s",10} | {"Avg Time",10} |");
+    Console.WriteLine($" | {new string('-', 19)} | {new string('-', 8)} | {new string('-', 10)} | {new string('-', 10)} | {new string('-', 10)} |");
+    string? lastScenario = null;
+    foreach (var row in allRows)
+    {
+        var scenario = row.Scenario == lastScenario ? "" : row.Scenario;
+        lastScenario = row.Scenario;
+        Console.WriteLine($" | {scenario,-19} | {row.Phase,-8} | {Bold}{Green}{row.MedianRate,10:N0}{Reset} | {row.AvgRate,10:N0} | {row.AvgSeconds,8:F2}s  |");
+    }
+    Console.WriteLine();
+
+    if (jsonPath != null)
+    {
+        var jsonResult = new
+        {
+            timestamp = DateTime.UtcNow.ToString("o"),
+            versions = new { ibmmqClient = mqClientVersion },
+            concurrency,
+            iterations,
+            results = allRows.Select(r => new
+            {
+                scenario = r.Scenario,
+                phase = r.Phase,
+                medianRate = r.MedianRate,
+                avgRate = r.AvgRate,
+                avgSeconds = Math.Round(r.AvgSeconds, 2)
+            })
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(jsonResult, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(jsonPath, json);
+        Console.WriteLine($"{Dim}Results written to {jsonPath}{Reset}");
+    }
+
+    return 0;
+}
+
+record BenchmarkRow(string Scenario, string Phase, double MedianRate, double AvgRate, double AvgSeconds);
 
 enum TxMode { None, Receive, Atomic }

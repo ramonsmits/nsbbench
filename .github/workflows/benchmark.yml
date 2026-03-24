@@ -58,20 +58,37 @@ jobs:
       - name: Build
         run: dotnet build src/nsbbench.slnx -c Release --no-restore
 
-      - name: Benchmark
+      - name: mqbench
         env:
           FORCE_COLOR: '1'
-        run: dotnet run -c Release --no-build --project src/nsbbench -- benchmark -n 4000 --json results.json
+        run: dotnet run -c Release --no-build --project src/mqbench -- benchmark --express -n 4000 -i 5 --json mqbench.json
+
+      - name: nsbbench
+        env:
+          FORCE_COLOR: '1'
+        run: dotnet run -c Release --no-build --project src/nsbbench -- benchmark --express -n 4000 -i 5 --json nsbbench.json
 
       - name: Summary
-        if: always() && hashFiles('results.json') != ''
+        if: always()
         run: |
-          jq -r '
-            "## Benchmark Results\n\n" +
-            "**NServiceBus** " + .versions.nservicebus + " | " +
-            "**Transport** " + .versions.transport + " | " +
-            "**IBM MQ Client** " + .versions.ibmmqClient + "\n\n" +
-            "| Scenario | Phase | Median/s | Avg/s | Alloc/msg | GC 0/1/2 | Pause | CPU |\n" +
-            "|---|---|---:|---:|---|---|---|---|\n" +
-            (.results[] | "| \(.scenario) | \(.phase) | \(.medianRate | round) | \(.avgRate | round) | \(.allocPerMsg) | \(.gc.gen0)/\(.gc.gen1)/\(.gc.gen2) | \(.pauseMs | round)ms | \(.cpuSec)s |")
-          ' results.json >> "$GITHUB_STEP_SUMMARY"
+          if [ -f mqbench.json ]; then
+            jq -r '
+              "## mqbench (raw IBM MQ)\n\n" +
+              "**IBM MQ Client** " + .versions.ibmmqClient + "\n\n" +
+              "| Scenario | Phase | Median/s | Avg/s | Avg Time |\n" +
+              "|---|---|---:|---:|---:|\n" +
+              (.results[] | "| \(.scenario) | \(.phase) | \(.medianRate | round) | \(.avgRate | round) | \(.avgSeconds)s |")
+            ' mqbench.json >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f nsbbench.json ]; then
+            jq -r '
+              "## nsbbench (NServiceBus)\n\n" +
+              "**NServiceBus** " + .versions.nservicebus + " | " +
+              "**Transport** " + .versions.transport + " | " +
+              "**IBM MQ Client** " + .versions.ibmmqClient + "\n\n" +
+              "| Scenario | Phase | Median/s | Avg/s | Avg Time | Alloc/msg | GC 0/1/2 | Pause | CPU |\n" +
+              "|---|---|---:|---:|---:|---|---|---|---|\n" +
+              (.results[] | "| \(.scenario) | \(.phase) | \(.medianRate | round) | \(.avgRate | round) | \(.avgSeconds)s | \(.allocPerMsg) | \(.gc.gen0)/\(.gc.gen1)/\(.gc.gen2) | \(.pauseMs | round)ms | \(.cpuSec)s |")
+            ' nsbbench.json >> "$GITHUB_STEP_SUMMARY"
+          fi
