@@ -2,6 +2,7 @@ using System.Collections;
 using System.Diagnostics;
 using System.Reflection;
 using IBM.WMQ;
+using IBM.WMQ.PCF;
 
 var useColor = Environment.GetEnvironmentVariable("NO_COLOR") is null
     && (!Console.IsOutputRedirected || Environment.GetEnvironmentVariable("FORCE_COLOR") is not null);
@@ -443,6 +444,15 @@ int RunBenchmark(string[] a)
         (false, true) => new[] { false },
     };
 
+    // Ensure queues exist with sufficient depth
+    var maxCount = explicitCount ?? 150_000;
+    var requiredDepth = Math.Max(maxCount + 1000, 5000);
+    using (var setupQm = ConnectQueueManager())
+    {
+        foreach (var q in new[] { queueA, queueB })
+            EnsureQueue(setupQm, q, requiredDepth);
+    }
+
     Console.WriteLine($"=== mqbench: concurrency={concurrency}, {iterations} iterations ===");
     Console.WriteLine();
 
@@ -590,6 +600,32 @@ int RunBenchmark(string[] a)
     }
 
     return 0;
+}
+
+void EnsureQueue(MQQueueManager qm, string name, int maxDepth)
+{
+    var agent = new PCFMessageAgent(qm);
+    try
+    {
+        var create = new PCFMessage(MQC.MQCMD_CREATE_Q);
+        create.AddParameter(MQC.MQCA_Q_NAME, name);
+        create.AddParameter(MQC.MQIA_Q_TYPE, MQC.MQQT_LOCAL);
+        create.AddParameter(MQC.MQIA_MAX_Q_DEPTH, maxDepth);
+        create.AddParameter(MQC.MQIA_DEF_PERSISTENCE, MQC.MQPER_PERSISTENT);
+        agent.Send(create);
+    }
+    catch (PCFException e) when (e.ReasonCode == MQC.MQRCCF_OBJECT_ALREADY_EXISTS)
+    {
+        var alter = new PCFMessage(MQC.MQCMD_CHANGE_Q);
+        alter.AddParameter(MQC.MQCA_Q_NAME, name);
+        alter.AddParameter(MQC.MQIA_Q_TYPE, MQC.MQQT_LOCAL);
+        alter.AddParameter(MQC.MQIA_MAX_Q_DEPTH, maxDepth);
+        agent.Send(alter);
+    }
+    finally
+    {
+        agent.Disconnect();
+    }
 }
 
 record BenchmarkRow(string Scenario, string Phase, double MedianRate, double AvgRate, double AvgSeconds);
