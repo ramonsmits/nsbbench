@@ -23,14 +23,26 @@ jobs:
         ports:
           - 1414:1414
         options: >-
-          --health-cmd "dspmq"
+          --health-cmd "dspmq -m QM1 -n -o status | grep -q RUNNING && echo 'DEFINE CHANNEL(ADMIN.SVRCONN) CHLTYPE(SVRCONN)' | runmqsc QM1 > /dev/null 2>&1; true"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 10
-          --health-start-period 30s
+          --health-retries 20
+          --health-start-period 60s
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Wait for MQ listener
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z localhost 1414 2>/dev/null; then
+              echo "MQ listener ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MQ listener not available"
+          exit 1
 
       - uses: actions/setup-dotnet@v4
         with:
