@@ -3,7 +3,8 @@ using System.Diagnostics;
 using System.Reflection;
 using IBM.WMQ;
 
-var useColor = !Console.IsOutputRedirected && Environment.GetEnvironmentVariable("NO_COLOR") is null;
+var useColor = Environment.GetEnvironmentVariable("NO_COLOR") is null
+    && (!Console.IsOutputRedirected || Environment.GetEnvironmentVariable("FORCE_COLOR") is not null);
 var Cyan = useColor ? "\x1b[36m" : "";
 var Green = useColor ? "\x1b[32m" : "";
 var Yellow = useColor ? "\x1b[33m" : "";

@@ -8,7 +8,8 @@ using NServiceBus.Transport;
 using NServiceBus.Transport.IBMMQ;
 using IBM.WMQ;
 
-var useColor = !Console.IsOutputRedirected && Environment.GetEnvironmentVariable("NO_COLOR") is null;
+var useColor = Environment.GetEnvironmentVariable("NO_COLOR") is null
+    && (!Console.IsOutputRedirected || Environment.GetEnvironmentVariable("FORCE_COLOR") is not null);
 var Cyan = useColor ? "\x1b[36m" : "";
 var Green = useColor ? "\x1b[32m" : "";
 var Yellow = useColor ? "\x1b[33m" : "";
@@ -18,15 +19,10 @@ var Reset = useColor ? "\x1b[0m" : "";
 
 LogManager.UseFactory(new StderrLoggerFactory());
 
-var coreVersion = typeof(IMessage).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-    ?? typeof(IMessage).Assembly.GetName().Version?.ToString()
-    ?? "unknown";
-var transportVersion = typeof(IBMMQTransport).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-    ?? typeof(IBMMQTransport).Assembly.GetName().Version?.ToString()
-    ?? "unknown";
+var coreVersion = typeof(Endpoint).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+var transportVersion = typeof(IBMMQTransport).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 var mqClientVersion = typeof(MQQueueManager).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-    ?? typeof(MQQueueManager).Assembly.GetName().Version?.ToString()
-    ?? "unknown";
+    ?? typeof(MQQueueManager).Assembly.GetName().Version?.ToString();
 Console.WriteLine($"{Dim}NServiceBus {coreVersion}{Reset}");
 Console.WriteLine($"{Dim}NServiceBus.Transport.IBMMQ {transportVersion}{Reset}");
 Console.WriteLine($"{Dim}IBMMQDotnetClient {mqClientVersion}{Reset}");
@@ -645,6 +641,7 @@ async Task<int> RunBenchmark(string[] a)
     int? explicitCount = null;
     int concurrency = Environment.ProcessorCount;
     int iterations = 3;
+    string? jsonPath = null;
 
     for (var i = 1; i < a.Length; i++)
     {
@@ -675,6 +672,9 @@ async Task<int> RunBenchmark(string[] a)
                 if (n % 2 == 0)
                     throw new ArgumentException("Iterations must be odd for median calculation.");
                 iterations = n;
+                break;
+            case "--json" when i + 1 < a.Length:
+                jsonPath = a[++i];
                 break;
         }
     }
@@ -740,6 +740,40 @@ async Task<int> RunBenchmark(string[] a)
     }
 
     PrintSummaryTable(allRows);
+
+    if (jsonPath != null)
+    {
+        var jsonResult = new
+        {
+            timestamp = DateTime.UtcNow.ToString("o"),
+            versions = new
+            {
+                nservicebus = coreVersion,
+                transport = transportVersion,
+                ibmmqClient = mqClientVersion
+            },
+            concurrency,
+            iterations,
+            results = allRows.Select(r => new
+            {
+                scenario = r.Scenario,
+                phase = r.Phase,
+                medianRate = r.MedianRate,
+                avgRate = r.AvgRate,
+                allocPerMsg = r.AllocPerMsg,
+                gc = new { gen0 = r.Gen0, gen1 = r.Gen1, gen2 = r.Gen2 },
+                pauseMs = r.PauseMs,
+                cpuSec = r.CpuSec,
+                diskWrites = r.DiskWrites,
+                diskWriteBytes = r.DiskWriteBytes,
+                diskAwaitMs = r.DiskAwaitMs
+            })
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(jsonResult, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(jsonPath, json);
+        Console.WriteLine($"{Dim}Results written to {jsonPath}{Reset}");
+    }
+
     return 0;
 }
 

@@ -59,4 +59,19 @@ jobs:
         run: dotnet build src/nsbbench.slnx -c Release --no-restore
 
       - name: Benchmark
-        run: dotnet run -c Release --no-build --project src/nsbbench -- benchmark -n 4000
+        env:
+          FORCE_COLOR: '1'
+        run: dotnet run -c Release --no-build --project src/nsbbench -- benchmark -n 4000 --json results.json
+
+      - name: Summary
+        if: always() && hashFiles('results.json') != ''
+        run: |
+          jq -r '
+            "## Benchmark Results\n\n" +
+            "**NServiceBus** " + .versions.nservicebus + " | " +
+            "**Transport** " + .versions.transport + " | " +
+            "**IBM MQ Client** " + .versions.ibmmqClient + "\n\n" +
+            "| Scenario | Phase | Median/s | Avg/s | Alloc/msg | GC 0/1/2 | Pause | CPU |\n" +
+            "|---|---|---:|---:|---|---|---|---|\n" +
+            (.results[] | "| \(.scenario) | \(.phase) | \(.medianRate | round) | \(.avgRate | round) | \(.allocPerMsg) | \(.gc.gen0)/\(.gc.gen1)/\(.gc.gen2) | \(.pauseMs | round)ms | \(.cpuSec)s |")
+          ' results.json >> "$GITHUB_STEP_SUMMARY"
