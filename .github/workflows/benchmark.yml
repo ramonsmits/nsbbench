@@ -58,15 +58,15 @@ jobs:
       - name: Build
         run: dotnet build src/nsbbench.slnx -c Release --no-restore
 
-      - name: mqbench
-        env:
-          FORCE_COLOR: '1'
-        run: dotnet run -c Release --no-build --project src/mqbench -- benchmark --express -n 4000 -i 5 --json mqbench.json
-
       - name: nsbbench
         env:
           FORCE_COLOR: '1'
         run: dotnet run -c Release --no-build --project src/nsbbench -- benchmark --express -n 4000 -i 5 --json nsbbench.json
+
+      - name: mqbench
+        env:
+          FORCE_COLOR: '1'
+        run: dotnet run -c Release --no-build --project src/mqbench -- benchmark --express -n 4000 -i 5 --json mqbench.json
 
       - name: Summary
         if: always()
