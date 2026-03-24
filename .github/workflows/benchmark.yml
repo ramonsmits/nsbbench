@@ -23,11 +23,14 @@ jobs:
         ports:
           - 1414:1414
         options: >-
-          --health-cmd "dspmq -m QM1 -n -o status | grep -q RUNNING && echo 'DEFINE CHANNEL(ADMIN.SVRCONN) CHLTYPE(SVRCONN)' | runmqsc QM1 > /dev/null 2>&1; true"
+          --health-cmd "dspmq -m QM1 -n -o status | grep -q RUNNING"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 20
           --health-start-period 60s
+
+    env:
+      IBMMQ_CHANNEL: DEV.ADMIN.SVRCONN
 
     steps:
       - uses: actions/checkout@v4
