@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="NServiceBus.Transport.IBMMQ" />
+    <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 </Project>

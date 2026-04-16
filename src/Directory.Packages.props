@@ -6,5 +6,6 @@
   <ItemGroup>
     <PackageVersion Include="IBMMQDotnetClient" Version="9.*" />
     <PackageVersion Include="NServiceBus.Transport.IBMMQ" Version="1.*-*" />
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.6" />
   </ItemGroup>
 </Project>
